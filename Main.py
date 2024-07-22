@@ -348,6 +348,7 @@ def main(args, seed=None, baked_server_options: Optional[Dict[str, object]] = No
                 locations_data: Dict[int, Dict[int, Tuple[int, int, int]]] = {player: {} for player in multiworld.player_ids}
                 for location in multiworld.get_filled_locations():
                     if type(location.address) == int:
+                        assert location.item is not None, f"item should not be None. Location: {location}"
                         assert location.item.code is not None, "item code None should be event, " \
                                                                "location.address should then also be None. Location: " \
                                                                f" {location}"

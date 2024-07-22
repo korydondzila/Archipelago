@@ -358,7 +358,7 @@ class MultiWorld():
         return ret
 
     def get_items(self) -> List[Item]:
-        return [loc.item for loc in self.get_filled_locations()] + self.itempool
+        return [loc.item for loc in self.get_filled_locations()] + [loc.event for loc in self.get_filled_locations()] + self.itempool
 
     def find_item_locations(self, item, player: int, resolve_group_locations: bool = False) -> List[Location]:
         if resolve_group_locations:
@@ -415,10 +415,10 @@ class MultiWorld():
                                            for player in self.regions.location_cache))
 
     def get_unfilled_locations(self, player: Optional[int] = None) -> List[Location]:
-        return [location for location in self.get_locations(player) if location.item is None]
+        return [location for location in self.get_locations(player) if location.item is None and not location.locked]
 
     def get_filled_locations(self, player: Optional[int] = None) -> List[Location]:
-        return [location for location in self.get_locations(player) if location.item is not None]
+        return [location for location in self.get_locations(player) if location.item is not None or location.event is not None]
 
     def get_reachable_locations(self, state: Optional[CollectionState] = None, player: Optional[int] = None) -> List[Location]:
         state: CollectionState = state if state else self.state
@@ -465,8 +465,10 @@ class MultiWorld():
             if self.has_beaten_game(self.state):
                 return True
             state = CollectionState(self)
-        prog_locations = {location for location in self.get_locations() if location.item
-                          and location.item.advancement and location not in state.locations_checked}
+        prog_locations = {
+            location for location in self.get_locations()
+            if location.item and location.item.advancement and location not in state.locations_checked
+        }
 
         while prog_locations:
             sphere: Set[Location] = set()
@@ -513,7 +515,10 @@ class MultiWorld():
                 break
 
             for location in sphere:
-                state.collect(location.item, True, location)
+                if location.item:
+                    state.collect(location.item, True, location)
+                if location.event:
+                    state.collect(location.event, True, location)
             locations -= sphere
 
     def fulfills_accessibility(self, state: Optional[CollectionState] = None):
@@ -532,8 +537,7 @@ class MultiWorld():
 
         def location_condition(location: Location):
             """Determine if this location has to be accessible, location is already filtered by location_relevant"""
-            if location.player in players["locations"] or (location.item and location.item.player not in
-                                                           players["minimal"]):
+            if location.player in players["locations"] or (location.item and location.item.player not in players["minimal"]) or (location.event and location.event.player not in players["minimal"]):
                 return True
             return False
 
@@ -569,6 +573,8 @@ class MultiWorld():
             for location in sphere:
                 if location.item:
                     state.collect(location.item, True, location)
+                if location.event:
+                    state.collect(location.event, True, location)
 
             if self.has_beaten_game(state):
                 beatable_fulfilled = True
@@ -692,8 +698,12 @@ class CollectionState():
             locations -= reachable_events
             for event in reachable_events:
                 self.events.add(event)
-                assert isinstance(event.item, Item), "tried to collect Event with no Item"
-                self.collect(event.item, True, event)
+                if event.item:
+                    assert isinstance(event.item, Item), "tried to collect Event with no Item"
+                    self.collect(event.item, True, event)
+                if event.event:
+                    assert isinstance(event.event, Item), "tried to collect Event with no Item"
+                    self.collect(event.event, True, event)
 
     # item name related
     def has(self, item: str, player: int, count: int = 1) -> bool:
@@ -1038,6 +1048,7 @@ class Location:
     access_rule: Callable[[CollectionState], bool] = staticmethod(lambda state: True)
     item_rule = staticmethod(lambda item: True)
     item: Optional[Item] = None
+    event: Optional[Event] = None
 
     def __init__(self, player: int, name: str = '', address: Optional[int] = None, parent: Optional[Region] = None):
         self.player = player
@@ -1063,6 +1074,12 @@ class Location:
         item.location = self
         self.locked = True
 
+    def place_event(self, event: Event):
+        if self.event:
+            raise Exception(f"Location {self} event already filled.")
+        self.event = event
+        event.location = self
+
     def __repr__(self):
         return self.__str__()
 
@@ -1078,12 +1095,12 @@ class Location:
 
     @property
     def advancement(self) -> bool:
-        return self.item is not None and self.item.advancement
+        return self.item is not None and self.item.advancement or self.event is not None and self.event.advancement
 
     @property
     def is_event(self) -> bool:
         """Returns True if the address of this location is None, denoting it is an Event Location."""
-        return self.address is None
+        return self.address is None or self.event is not None
 
     @property
     def native_item(self) -> bool:
@@ -1179,6 +1196,11 @@ class Item:
         return f"{self.name} (Player {self.player})"
 
 
+class Event(Item):
+    def __init__(self, name: str, classification: ItemClassification, player: int):
+        super().__init__(name, classification, None, player)
+
+
 class EntranceInfo(TypedDict, total=False):
     player: int
     entrance: str
@@ -1215,7 +1237,7 @@ class Spoiler:
         from itertools import chain
         # get locations containing progress items
         multiworld = self.multiworld
-        prog_locations = {location for location in multiworld.get_filled_locations() if location.item.advancement}
+        prog_locations = {location for location in multiworld.get_filled_locations() if location.item and location.item.advancement or location.event and location.event.advancement}
         state_cache: List[Optional[CollectionState]] = [None]
         collection_spheres: List[Set[Location]] = []
         state = CollectionState(multiworld)
@@ -1229,7 +1251,10 @@ class Spoiler:
             sphere = {location for location in sphere_candidates if state.can_reach(location)}
 
             for location in sphere:
-                state.collect(location.item, True, location)
+                if location.item:
+                    state.collect(location.item, True, location)
+                if location.event:
+                    state.collect(location.event, True, location)
 
             sphere_candidates -= sphere
             collection_spheres.append(sphere)
@@ -1256,16 +1281,17 @@ class Spoiler:
             to_delete = set()
             for location in sphere:
                 # we remove the item at location and check if game is still beatable
-                logging.debug('Checking if %s (Player %d) is required to beat the game.', location.item.name,
-                              location.item.player)
-                old_item = location.item
-                location.item = None
-                if multiworld.can_beat_game(state_cache[num]):
-                    to_delete.add(location)
-                    restore_later[location] = old_item
-                else:
-                    # still required, got to keep it around
-                    location.item = old_item
+                if location.item:
+                    logging.debug('Checking if %s (Player %d) is required to beat the game.', location.item.name,
+                                  location.item.player)
+                    old_item = location.item
+                    location.item = None
+                    if multiworld.can_beat_game(state_cache[num]):
+                        to_delete.add(location)
+                        restore_later[location] = old_item
+                    else:
+                        # still required, got to keep it around
+                        location.item = old_item
 
             # cull entries in spheres for spoiler walkthrough at end
             sphere -= to_delete
@@ -1296,7 +1322,10 @@ class Spoiler:
             sphere = set(filter(state.can_reach, required_locations))
 
             for location in sphere:
-                state.collect(location.item, True, location)
+                if location.item:
+                    state.collect(location.item, True, location)
+                if location.event:
+                    state.collect(location.event, True, location)
 
             collection_spheres.append(sphere)
 
@@ -1314,7 +1343,8 @@ class Spoiler:
 
         for i, sphere in enumerate(collection_spheres):
             self.playthrough[str(i + 1)] = {
-                str(location): str(location.item) for location in sorted(sphere)}
+                str(location): (str(location.item) if location.item.advancement else str(location.event)) if location.item else "" for location in sorted(sphere)
+            }
         if create_paths:
             self.create_paths(state, collection_spheres)
 
@@ -1417,7 +1447,7 @@ class Spoiler:
 
             outfile.write('\n\nPlaythrough:\n\n')
             outfile.write('\n'.join(['%s: {\n%s\n}' % (sphere_nr, '\n'.join(
-                [f"  {location}: {item}" for (location, item) in sphere.items()] if isinstance(sphere, dict) else
+                [f"  {location}: {item}" if item else f"  {location}" for (location, item) in sphere.items()] if isinstance(sphere, dict) else
                 [f"  {item}" for item in sphere])) for (sphere_nr, sphere) in self.playthrough.items()]))
             if self.unreachables:
                 outfile.write('\n\nUnreachable Items:\n\n')

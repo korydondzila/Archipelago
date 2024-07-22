@@ -212,7 +212,7 @@ def fill_restrictive(multiworld: MultiWorld, base_state: CollectionState, locati
                             f"Unfilled locations:\n"
                             f"{', '.join(str(location) for location in locations)}\n"
                             f"Already placed {len(placements)}:\n"
-                            f"{', '.join(str(place) for place in placements)}")
+                            f"{', '.join(f'{str(place)} ({place.item})' for place in placements)}")
 
     item_pool.extend(unplaced_items)
 
@@ -358,7 +358,7 @@ def distribute_early_items(multiworld: MultiWorld,
         early_priority_locations: typing.List[Location] = []
         loc_indexes_to_remove: typing.Set[int] = set()
         base_state = multiworld.state.copy()
-        base_state.sweep_for_events(locations=(loc for loc in multiworld.get_filled_locations() if loc.address is None))
+        base_state.sweep_for_events(locations=(loc for loc in multiworld.get_filled_locations() if loc.is_event))
         for i, loc in enumerate(fill_locations):
             if loc.can_reach(base_state):
                 if loc.progress_type == LocationProgressType.PRIORITY:
@@ -454,7 +454,8 @@ def distribute_items_restrictive(multiworld: MultiWorld,
     call_all(multiworld, "fill_hook", progitempool, usefulitempool, filleritempool, fill_locations)
 
     locations: typing.Dict[LocationProgressType, typing.List[Location]] = {
-        loc_type: [] for loc_type in LocationProgressType}
+        loc_type: [] for loc_type in LocationProgressType
+    }
 
     for loc in fill_locations:
         locations[loc.progress_type].append(loc)
@@ -699,8 +700,13 @@ def balance_multiworld_progression(multiworld: MultiWorld) -> None:
                         # Check locations in the current sphere and gather progression items to swap earlier
                         for location in balancing_sphere:
                             if location.advancement:
-                                balancing_state.collect(location.item, True, location)
-                                player = location.item.player
+                                if location.item:
+                                    balancing_state.collect(location.item, True, location)
+                                    player = location.item.player
+                                if location.event:
+                                    balancing_state.collect(location.event, True, location)
+                                    player = location.event.player
+
                                 # only replace items that end up in another player's world
                                 if (not location.locked and not location.item.skip_in_prog_balancing and
                                         player in balancing_players and
@@ -738,7 +744,10 @@ def balance_multiworld_progression(multiworld: MultiWorld) -> None:
                                 l for l in items_to_replace
                                 if l.item.player == player
                             ), items_to_test):
-                                reducing_state.collect(location.item, True, location)
+                                if location.item:
+                                    reducing_state.collect(location.item, True, location)
+                                if location.event:
+                                    reducing_state.collect(location.event, True, location)
 
                             reducing_state.sweep_for_events(locations=locations_to_test)
 
@@ -771,7 +780,10 @@ def balance_multiworld_progression(multiworld: MultiWorld) -> None:
                                 logging.debug(f"Progression balancing moved {new_location.item} to {new_location}, "
                                               f"displacing {old_location.item} into {old_location}")
                                 moved_item_count += 1
-                                state.collect(new_location.item, True, new_location)
+                                if new_location.item:
+                                    state.collect(new_location.item, True, new_location)
+                                if new_location.event:
+                                    state.collect(new_location.event, True, new_location)
                                 break
                         else:
                             logging.warning(f"Could not Progression Balance {old_location.item}")
@@ -787,7 +799,10 @@ def balance_multiworld_progression(multiworld: MultiWorld) -> None:
 
             for location in sphere_locations:
                 if location.advancement:
-                    state.collect(location.item, True, location)
+                    if location.item:
+                        state.collect(location.item, True, location)
+                    if location.event:
+                        state.collect(location.event, True, location)
             checked_locations |= sphere_locations
 
             if multiworld.has_beaten_game(state):
