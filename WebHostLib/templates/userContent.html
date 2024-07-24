@@ -6,6 +6,47 @@
     <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename="styles/userContent.css") }}" />
     <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename="styles/markdown.css") }}" />
     <script type="application/ecmascript" src="{{ url_for('static', filename="assets/userContent.js") }}"></script>
+    <style>
+        /* Tooltip container */
+        .tooltip2 {
+            position: relative;
+            display: inline-block;
+        }
+
+        /* Tooltip text */
+        .tooltip2 .tooltipText {
+            visibility: hidden;
+            width: max-content;
+            font-family: monospace;
+            font-size: x-small;
+            background-color: #222222ee;
+            color: #fff;
+            padding: 5px;
+            border-radius: 6px;
+            position: absolute;
+            white-space: pre-wrap;
+            z-index: 1;
+            transform: translateY(-50%);
+            top: 50%;
+            left: 130%;
+        }
+
+        .tooltip2 .tooltipText::after {
+            content: " ";
+            position: absolute;
+            top: 50%;
+            right: 100%;
+            white-space: normal;
+            margin-top: -5px;
+            border-width: 5px;
+            border-style: solid;
+            border-color: transparent #222222ee transparent transparent;
+        }
+
+        .tooltip2:hover .tooltipText {
+            visibility: visible;
+        }
+    </style>
 {% endblock %}
 
 {% block body %}
@@ -34,20 +75,48 @@
                                 <td><a href="{{ url_for("view_seed", seed=room.seed.id) }}">{{ room.seed.id|suuid }}</a></td>
                                 <td><a href="{{ url_for("host_room", room=room.id) }}">{{ room.id|suuid }}</a></td>
                                 <td>
+                                    {% set listSlots = [] %}
+                                    {% set listSlots2 = [] %}
                                     {% set title = [] %}
 
                                     {% for slot in room.seed.slots|list|sort(attribute="player_id") %}
                                         {% set player = "#" + slot["player_id"]|string + " " + slot["player_name"] + " : " + slot["game"] %}
-                                        {% set _ = title.append(player) %}
+                                        {% set _ = listSlots.append(player) %}
                                     {% endfor %}
 
-                                    <div title="{{ title|join('\n') }}">
+                                    {% set longest = listSlots|map("length")|max %}
+
+                                    {% for slot in listSlots %}
+                                        {% if slot|length < longest %}
+                                            {% set slot = ("%-" + longest|string + "s")|format(slot) %}
+                                        {% endif %}
+                                        {% set _ = listSlots2.append(slot) %}
+                                    {% endfor %}
+
+                                    {# left-to-right top-to-bottom #}
+                                    {% for row in listSlots2|batch(4) %}
+                                        {% set _ = title.append(row|join(' | ')) %}
+                                    {% endfor %}
+
+                                    {# top-to-bottom left-to-right #}
+{#                                    {% set batchSize = (listSlots2|length / 4)|round(method='ceil')|int %}#}
+{#                                    {% set listSlots2 = listSlots2|batch(batchSize)|list %}#}
+{#                                    {% for i in range(batchSize) %}#}
+{#                                        {% set row = [listSlots2[0][i], listSlots2[1][i], listSlots2[2][i]] %}#}
+{#                                        {% if i < listSlots2[3]|length %}#}
+{#                                            {% set _ = row.append(listSlots2[3][i]) %}#}
+{#                                        {% endif %}#}
+{#                                        {% set _ = title.append(row|join(' | ')) %}#}
+{#                                    {% endfor %}#}
+
+                                    <div class="tooltip2">
                                         {{ room.seed.slots|length }}
+                                        <span class="tooltipText">{{ title|join('\n') }}</span>
                                     </div>
                                 </td>
                                 <td>{{ room.creation_time.strftime("%Y-%m-%d %H:%M") }}</td>
                                 <td>{{ room.last_activity.strftime("%Y-%m-%d %H:%M") }}</td>
-                                <td><a href="{{ url_for("disown_room", room=room.id) }}">Delete next maintenance.</td>
+                                <td><a href="{{ url_for("disown_room", room=room.id) }}">Delete next maintenance.</a></td>
                             </tr>
                         {% endfor %}
                     </tbody>
@@ -75,7 +144,7 @@
                                     {% if seed.multidata %}
                                         {% set title = [] %}
 
-                                        {% for slot in seed.slots|list|sort(attribute="player_id") %}
+                                        {% for slot in (seed.slots|list|sort(attribute="player_id"))[:30] %}
                                             {% set player = "#" + slot["player_id"]|string + " " + slot["player_name"] + " : " + slot["game"] %}
                                             {% set _ = title.append(player) %}
                                         {% endfor %}
@@ -88,7 +157,7 @@
                                     {% endif %}
                                 </td>
                                 <td>{{ seed.creation_time.strftime("%Y-%m-%d %H:%M") }}</td>
-                                <td><a href="{{ url_for("disown_seed", seed=seed.id) }}">Delete next maintenance.</td>
+                                <td><a href="{{ url_for("disown_seed", seed=seed.id) }}">Delete next maintenance.</a></td>
                             </tr>
                         {% endfor %}
                     </tbody>
